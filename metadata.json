@@ -1,0 +1,5 @@
+{
+  "name": "SonicForge AI",
+  "description": "A professional-grade sound effect generator for game developers. Uses Gemini AI to design synthesizer parameters for infinite, customizable sound variations (lasers, jumps, explosions, UI clicks) and renders them to high-quality WAV files in the browser.",
+  "requestFramePermissions": []
+}
