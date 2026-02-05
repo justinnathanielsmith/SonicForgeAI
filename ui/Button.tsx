@@ -2,9 +2,10 @@ import React from 'react';
 import { Loader2 } from 'lucide-react';
 
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: 'primary' | 'secondary' | 'danger' | 'ghost';
+  variant?: 'primary' | 'secondary' | 'danger' | 'ghost' | 'accent';
   isLoading?: boolean;
   icon?: React.ReactNode;
+  size?: 'sm' | 'md' | 'lg';
 }
 
 const Button: React.FC<ButtonProps> = ({ 
@@ -14,27 +15,35 @@ const Button: React.FC<ButtonProps> = ({
   icon,
   className = '',
   disabled,
+  size = 'md',
   ...props 
 }) => {
-  const baseStyles = "inline-flex items-center justify-center px-4 py-2 rounded-lg font-medium transition-all focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95";
+  const baseStyles = "relative inline-flex items-center justify-center transition-all disabled:opacity-40 disabled:cursor-not-allowed active:translate-x-[1px] active:translate-y-[1px] active:shadow-none uppercase tracking-widest text-[10px] sm:text-xs font-bold border-2";
   
+  const sizes = {
+    sm: "px-2 py-1",
+    md: "px-4 py-2",
+    lg: "px-6 py-3 text-sm"
+  };
+
   const variants = {
-    primary: "bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-500/30 focus:ring-indigo-500",
-    secondary: "bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700 focus:ring-gray-500",
-    danger: "bg-red-600 hover:bg-red-500 text-white focus:ring-red-500",
-    ghost: "bg-transparent hover:bg-gray-800 text-gray-400 hover:text-white"
+    primary: "bg-[#00ff66] text-[#000] border-[#000] shadow-[3px_3px_0px_0px_#166534] hover:bg-[#33ff85]",
+    accent: "bg-[#00e5ff] text-[#000] border-[#000] shadow-[3px_3px_0px_0px_#007785] hover:bg-[#33eaff]",
+    secondary: "bg-[#2a2a32] text-[#fff] border-[#000] shadow-[3px_3px_0px_0px_#141418] hover:bg-[#3f3f46]",
+    danger: "bg-[#ff3d3d] text-[#fff] border-[#000] shadow-[3px_3px_0px_0px_#7f1d1d] hover:bg-[#ff5c5c]",
+    ghost: "bg-transparent text-zinc-500 hover:text-white border-transparent hover:border-zinc-800"
   };
 
   return (
     <button 
-      className={`${baseStyles} ${variants[variant]} ${className}`}
+      className={`${baseStyles} ${variants[variant]} ${sizes[size]} ${className}`}
       disabled={disabled || isLoading}
       {...props}
     >
       {isLoading ? (
         <Loader2 className="w-4 h-4 mr-2 animate-spin" />
       ) : icon ? (
-        <span className="mr-2">{icon}</span>
+        <span className={children ? "mr-2" : ""}>{icon}</span>
       ) : null}
       {children}
     </button>

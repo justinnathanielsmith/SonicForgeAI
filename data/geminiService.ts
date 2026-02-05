@@ -36,12 +36,17 @@ export const generateSynthParams = async (
             volume: { type: Type.NUMBER },
             filterType: { type: Type.STRING },
             filterFreq: { type: Type.NUMBER },
-            qFactor: { type: Type.NUMBER }
+            qFactor: { type: Type.NUMBER },
+            distortion: { type: Type.NUMBER },
+            delayTime: { type: Type.NUMBER },
+            delayFeedback: { type: Type.NUMBER },
+            reverb: { type: Type.NUMBER }
           },
           required: [
             "waveform", "frequencyStart", "frequencyEnd", "duration",
             "attack", "decay", "sustain", "release", "volume",
-            "filterType", "filterFreq", "qFactor"
+            "filterType", "filterFreq", "qFactor", "distortion",
+            "delayTime", "delayFeedback", "reverb"
           ]
         }
       }

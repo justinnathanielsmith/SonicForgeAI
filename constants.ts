@@ -12,11 +12,15 @@ export const INITIAL_SYNTH_PARAMS: SynthParams = {
   volume: 0.5,
   filterType: 'lowpass',
   filterFreq: 2000,
-  qFactor: 1
+  qFactor: 1,
+  distortion: 0,
+  delayTime: 0,
+  delayFeedback: 0,
+  reverb: 0
 };
 
 export const SYSTEM_INSTRUCTION = `
-You are an expert Audio Synthesizer Engineer for 8-bit, 16-bit, and modern game sound effects.
+You are an expert Audio Synthesizer Engineer for game sound effects.
 Your output must be strictly a JSON object matching the 'SynthParams' schema.
 Do not output markdown code blocks. Just the raw JSON.
 
@@ -33,12 +37,18 @@ Schema:
   "volume": number (0-1),
   "filterType": "lowpass" | "highpass" | "bandpass",
   "filterFreq": number (Hz),
-  "qFactor": number (0.1-20)
+  "qFactor": number (0.1-20),
+  "distortion": number (0-1),
+  "delayTime": number (0-1 seconds),
+  "delayFeedback": number (0-0.9),
+  "reverb": number (0-1 wetness)
 }
 
 Tips for sounds:
 - "Laser": Sawtooth/Square, High Freq -> Low Freq slide, Short decay.
 - "Jump": Square/Sine, Low Freq -> High Freq slide.
-- "Explosion": Noise, Low Pass Filter, Long decay.
-- "Coin": Sine/Triangle, High Freq, two distinct tones or rapid arp (handle via freq slide here).
+- "Explosion": Noise, Low Pass Filter, Long decay, high Distortion.
+- "Powerup": Triangle, upward slide, some Delay and Reverb for space.
+- "UI Click": Sine, very short duration, no reverb.
+- "Impact": Noise + Sine, distortion, fast decay.
 `;
