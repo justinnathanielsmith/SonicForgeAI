@@ -1,4 +1,5 @@
-import React, { useReducer, useEffect, useRef, useState } from 'react';
+
+import React, { useReducer, useEffect, useRef, useState, useMemo } from 'react';
 import { 
   AppState, 
   Action, 
@@ -7,16 +8,18 @@ import {
   SoundPreset,
   SynthParams
 } from './types';
-import { generateSynthParams } from './data/geminiService';
-import { generateSoundBuffer, playBuffer, getAudioContext } from './domain/audioEngine';
-import { audioBufferToWav } from './domain/wavEncoder';
-import { synthParamsToMidi } from './domain/midiEncoder';
-import { loadHistory, saveHistory, loadCustomPresets, saveCustomPresets } from './data/storage';
+import { soundRepository } from './domain/SoundRepository';
+import { 
+  generateSoundUseCase, 
+  compileManualSoundUseCase, 
+  loadPresetUseCase,
+  createUserPresetUseCase
+} from './domain/useCases';
+import { playBuffer, getAudioContext } from './domain/audioEngine';
 import { SOUND_PRESETS } from './data/presets';
 import { INITIAL_SYNTH_PARAMS } from './constants';
 import Button from './ui/Button';
 import Visualizer from './ui/Visualizer';
-import MiniWaveform from './ui/MiniWaveform';
 import ManualEditor from './ui/ManualEditor';
 import { 
   Play, 
@@ -25,28 +28,44 @@ import {
   Wand2, 
   History, 
   Trash2, 
-  RefreshCw, 
   Sliders,
   Volume2,
   VolumeX,
   Zap,
-  AudioWaveform,
   Save,
   Star,
   Cpu,
   Terminal,
-  Settings,
-  BrainCircuit,
   Binary,
-  Music
+  Music,
+  Activity,
+  Sparkles,
+  ChevronRight,
+  RefreshCcw,
+  X
 } from 'lucide-react';
+
+// --- CONSTANTS ---
+const PROMPT_CHIPS = [
+  "RETRO_8BIT", "CRUNCHY_BASS", "METAL_CLANG", "LASER_BLAST", 
+  "UI_CLICK", "POWER_UP", "EXPLOSION", "GLITCHY", "AMBIENT_PAD"
+];
+
+const GEN_LOG_MESSAGES = [
+  "INITIALIZING_NEURAL_CORE...",
+  "SAMPLING_TIMBRE_SPACE...",
+  "EXTRACTING_HARMONICS...",
+  "MAPPING_ENVELOPE_CURVES...",
+  "VALIDATING_OSCILLATOR_SYNC...",
+  "COMPILING_WAV_BUFFER..."
+];
 
 // --- INITIAL STATE ---
 const initialState: AppState = {
   prompt: '',
   isGenerating: false,
-  history: loadHistory(),
-  customPresets: loadCustomPresets(),
+  history: soundRepository.getHistory(),
+  customPresets: soundRepository.getCustomPresets(),
   selectedSoundId: null,
   isPlaying: false,
   error: null,
@@ -110,16 +129,19 @@ const App: React.FC = () => {
   const [playbackTime, setPlaybackTime] = useState(0);
   const [isManualMode, setIsManualMode] = useState(false);
   const [manualParams, setManualParams] = useState<SynthParams>(INITIAL_SYNTH_PARAMS);
+  const [genStatus, setGenStatus] = useState<string | null>(null);
+  const [genLogIndex, setGenLogIndex] = useState(0);
   
   const animationRef = useRef<number>(0);
+  const logTimerRef = useRef<number>(0);
   const activeSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const activeGainRef = useRef<GainNode | null>(null);
   const playbackStartTimeRef = useRef<number>(0);
   const playbackOffsetRef = useRef<number>(0);
   const isSeekingRef = useRef<boolean>(false);
 
-  useEffect(() => { saveHistory(state.history); }, [state.history]);
-  useEffect(() => { saveCustomPresets(state.customPresets); }, [state.customPresets]);
+  useEffect(() => { soundRepository.saveHistory(state.history); }, [state.history]);
+  useEffect(() => { soundRepository.saveCustomPresets(state.customPresets); }, [state.customPresets]);
 
   useEffect(() => {
     if (activeGainRef.current) {
@@ -127,27 +149,31 @@ const App: React.FC = () => {
     }
   }, [volume]);
 
+  // Status Log Cycling
+  useEffect(() => {
+    if (state.isGenerating) {
+      setGenLogIndex(0);
+      logTimerRef.current = window.setInterval(() => {
+        setGenLogIndex(prev => (prev + 1) % GEN_LOG_MESSAGES.length);
+      }, 800);
+    } else {
+      clearInterval(logTimerRef.current);
+    }
+    return () => clearInterval(logTimerRef.current);
+  }, [state.isGenerating]);
+
+  // --- ACTIONS ---
+
   const handleManualCompile = async () => {
     dispatch({ type: IntentType.GENERATE_SOUND });
+    setGenStatus("ORCHESTRATING_BUFFER...");
     try {
-      const buffer = await generateSoundBuffer(manualParams);
-      const blob = audioBufferToWav(buffer);
-      const blobUrl = URL.createObjectURL(blob);
-
-      const newSound: SoundEntity = {
-        id: crypto.randomUUID(),
-        name: `SYNTH_${manualParams.waveform.toUpperCase().slice(0,3)}_${Date.now().toString().slice(-4)}`,
-        description: 'MANUAL_CONSTRUCTION',
-        params: { ...manualParams },
-        timestamp: Date.now(),
-        audioBuffer: buffer,
-        blobUrl
-      };
+      const newSound = await compileManualSoundUseCase(soundRepository, manualParams);
       dispatch({ type: IntentType.GENERATION_SUCCESS, payload: newSound });
       handlePlay(newSound);
     } catch (error: any) {
       dispatch({ type: IntentType.GENERATION_FAILURE, payload: 'COMPILE_ERROR' });
-    }
+    } finally { setGenStatus(null); }
   };
 
   const handleGenerate = async (remix: boolean = false) => {
@@ -158,55 +184,33 @@ const App: React.FC = () => {
 
     if (!state.prompt && !remix) return;
     dispatch({ type: IntentType.GENERATE_SOUND });
+    setGenStatus(remix ? "REMIXING_DNA..." : "AI_REASONING...");
+    
     try {
       let baseParams = undefined;
       if (remix && state.selectedSoundId) {
          const selected = state.history.find(s => s.id === state.selectedSoundId);
          if (selected) baseParams = selected.params;
       }
-      const params = await generateSynthParams(state.prompt, baseParams);
-      const buffer = await generateSoundBuffer(params);
-      const blob = audioBufferToWav(buffer);
-      const blobUrl = URL.createObjectURL(blob);
-
-      const newSound: SoundEntity = {
-        id: crypto.randomUUID(),
-        name: remix ? `RM_ ${state.prompt.slice(0, 10).toUpperCase()}` : (state.prompt || 'CORE_SND'),
-        description: state.prompt,
-        params,
-        timestamp: Date.now(),
-        audioBuffer: buffer,
-        blobUrl
-      };
+      
+      const newSound = await generateSoundUseCase(soundRepository, state.prompt, baseParams);
       dispatch({ type: IntentType.GENERATION_SUCCESS, payload: newSound });
       handlePlay(newSound);
     } catch (error: any) {
       dispatch({ type: IntentType.GENERATION_FAILURE, payload: 'COMPILE_FAILURE' });
-    }
+    } finally { setGenStatus(null); }
   };
 
-  const handleLoadPreset = async (preset: { name: string, params: any }) => {
+  const handleLoadPreset = async (preset: SoundPreset) => {
+    setGenStatus("LOADING_PATCH...");
     try {
-      const buffer = await generateSoundBuffer(preset.params);
-      const blob = audioBufferToWav(buffer);
-      const blobUrl = URL.createObjectURL(blob);
-
-      const newSound: SoundEntity = {
-        id: crypto.randomUUID(),
-        name: preset.name.toUpperCase(),
-        description: 'PRESET_LOAD',
-        params: preset.params,
-        timestamp: Date.now(),
-        audioBuffer: buffer,
-        blobUrl
-      };
-
+      const newSound = await loadPresetUseCase(soundRepository, preset);
       dispatch({ type: IntentType.LOAD_PRESET, payload: newSound });
       handlePlay(newSound);
       if (isManualMode) setManualParams(preset.params);
     } catch (error) {
       console.error(error);
-    }
+    } finally { setGenStatus(null); }
   };
 
   const handleSaveAsPreset = () => {
@@ -214,22 +218,26 @@ const App: React.FC = () => {
     if (!selected) return;
     const presetName = prompt("NAME PRESET:", selected.name);
     if (!presetName) return;
-    const newPreset: SoundPreset = {
-      id: crypto.randomUUID(),
-      name: presetName.toUpperCase(),
-      description: `USR_${selected.name}`,
-      params: { ...selected.params }
-    };
+    const newPreset = createUserPresetUseCase(selected, presetName);
     dispatch({ type: IntentType.SAVE_CUSTOM_PRESET, payload: newPreset });
   };
+
+  const addChipToPrompt = (chip: string) => {
+    const newPrompt = state.prompt ? `${state.prompt} ${chip.toLowerCase()}` : chip.toLowerCase();
+    dispatch({ type: IntentType.UPDATE_PROMPT, payload: newPrompt });
+  };
+
+  // --- PLAYBACK CONTROLS ---
 
   const handlePlay = (sound: SoundEntity, offset: number = 0) => {
     stopCurrentPlayback();
     getAudioContext().resume();
     if (!sound.audioBuffer) {
-        generateSoundBuffer(sound.params).then(buffer => {
+        setGenStatus("SYNTHESIZING_CACHE...");
+        soundRepository.renderAudio(sound.params).then(buffer => {
             sound.audioBuffer = buffer;
-            sound.blobUrl = URL.createObjectURL(audioBufferToWav(buffer));
+            sound.blobUrl = URL.createObjectURL(soundRepository.exportWav(buffer));
+            setGenStatus(null);
             startPlayback(sound, offset);
         });
     } else { startPlayback(sound, offset); }
@@ -249,6 +257,7 @@ const App: React.FC = () => {
     dispatch({ type: IntentType.PLAY_SOUND, payload: sound.id });
     playbackOffsetRef.current = offset;
     playbackStartTimeRef.current = getAudioContext().currentTime;
+    
     const { source, analyser, gainNode } = playBuffer(sound.audioBuffer, volume, offset, () => {
       if (!isSeekingRef.current) {
         dispatch({ type: IntentType.STOP_SOUND });
@@ -279,25 +288,21 @@ const App: React.FC = () => {
     }
   };
 
-  const handleDownload = (sound: SoundEntity) => {
-    if (!sound.blobUrl) return;
-    const a = document.createElement('a');
-    a.href = sound.blobUrl;
-    a.download = `${sound.name.replace(/\s+/g, '_')}.wav`;
-    a.click();
-  };
-
-  const handleMidiExport = (sound: SoundEntity) => {
-    const blob = synthParamsToMidi(sound.params);
+  const handleDownloadWav = (sound: SoundEntity) => {
+    if (!sound.audioBuffer) return;
+    const blob = soundRepository.exportWav(sound.audioBuffer);
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${sound.name.replace(/\s+/g, '_')}_pattern.mid`;
+    a.download = `${sound.name.replace(/\s+/g, '_')}.wav`;
     a.click();
     URL.revokeObjectURL(url);
   };
 
-  const selectedSound = state.history.find(s => s.id === state.selectedSoundId);
+  const selectedSound = useMemo(() => 
+    state.history.find(s => s.id === state.selectedSoundId), 
+  [state.history, state.selectedSoundId]);
+
   const duration = selectedSound?.audioBuffer?.duration || (selectedSound ? selectedSound.params.duration + selectedSound.params.release : 1);
 
   return (
@@ -311,26 +316,25 @@ const App: React.FC = () => {
           <div>
             <h1 className="text-3xl font-bold tracking-tighter uppercase leading-none text-[#f0f0f5]">SonicForge</h1>
             <div className="flex items-center gap-2 mt-1">
-              <span className="text-[10px] bg-zinc-800 text-zinc-400 px-2 py-0.5 font-bold uppercase tracking-widest border border-zinc-700">OS_v3.0.2</span>
+              <span className="text-[10px] bg-zinc-800 text-zinc-400 px-2 py-0.5 font-bold uppercase tracking-widest border border-zinc-700">OS_v3.2_PRO</span>
               <div className="w-2 h-2 rounded-full bg-[#00ff66] animate-pulse"></div>
               <span className="text-[8px] font-mono text-zinc-500 uppercase">ENGINE_CONNECTED</span>
             </div>
           </div>
         </div>
         <div className="flex flex-col items-end font-mono">
-          <div className="text-[10px] text-zinc-400 uppercase tracking-widest font-bold">GEMINI_THINK_CORE</div>
-          <div className="text-[8px] text-zinc-600 mt-1">44.1KHZ // MIDI_ENABLED // PCM_MONO</div>
+          <div className="text-[10px] text-zinc-400 uppercase tracking-widest font-bold">AI_ARCHITECT_ACTIVE</div>
+          <div className="text-[8px] text-zinc-600 mt-1">PROMPT_ENGINE // DNA_EVOLUTION // MIDI_GEN</div>
         </div>
       </header>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
         <section className="lg:col-span-8 space-y-8">
-          {/* Main Monitor */}
           <Visualizer data={state.analyzerData} isPlaying={state.isPlaying} />
 
           {/* Active Control Panel */}
           {selectedSound && (
-            <div className="pixel-card p-6 border-[#00e5ff] border-l-[12px] bg-[#1a1a1e]">
+            <div className="pixel-card p-6 border-[#00e5ff] border-l-[12px] bg-[#1a1a1e] relative overflow-hidden">
               <div className="space-y-6">
                 <div className="space-y-2">
                   <div className="flex justify-between text-[10px] font-bold text-[#00e5ff] uppercase tracking-widest">
@@ -362,10 +366,7 @@ const App: React.FC = () => {
                       {volume === 0 ? <VolumeX className="w-4 h-4 text-red-500" /> : <Volume2 className="w-4 h-4 text-[#00e5ff]" />}
                       <input type="range" min="0" max="1" step="0.01" value={volume} onChange={(e) => setVolume(parseFloat(e.target.value))} className="w-24 h-2 accent-[#00e5ff]" />
                     </div>
-                    <div className="flex gap-2">
-                      <Button variant="accent" onClick={() => handleDownload(selectedSound)} icon={<Download className="w-4 h-4" />}>WAV</Button>
-                      <Button variant="secondary" onClick={() => handleMidiExport(selectedSound)} icon={<Music className="w-4 h-4" />} title="Export MIDI Sequence">MIDI</Button>
-                    </div>
+                    <Button variant="accent" onClick={() => handleDownloadWav(selectedSound)} icon={<Download className="w-4 h-4" />}>WAV</Button>
                   </div>
                 </div>
               </div>
@@ -373,34 +374,99 @@ const App: React.FC = () => {
           )}
 
           {/* Construction Unit */}
-          <div className="pixel-card p-8 bg-[#141418] relative">
+          <div className="pixel-card p-8 bg-[#141418] relative overflow-hidden">
+            {state.isGenerating && (
+                <div className="absolute inset-0 bg-black/80 backdrop-blur-md z-30 flex items-center justify-center border-4 border-[#00ff66]">
+                  <div className="flex flex-col items-center gap-4 w-full max-w-md">
+                    <Sparkles className="w-16 h-16 text-[#00ff66] animate-pulse" />
+                    <div className="w-full bg-zinc-900 border-2 border-zinc-800 p-4 font-mono text-left">
+                      <div className="text-[10px] text-[#00ff66] flex items-center gap-2 mb-2">
+                         <Terminal className="w-3 h-3" /> ARCHITECT_PROCESS_v3.2
+                      </div>
+                      <div className="space-y-1 h-12 overflow-hidden">
+                        <div className="text-[9px] text-zinc-400 flex items-center gap-2">
+                           <ChevronRight className="w-2 h-2" /> {GEN_LOG_MESSAGES[genLogIndex]}
+                        </div>
+                        <div className="text-[9px] text-zinc-600 flex items-center gap-2 opacity-50">
+                           <ChevronRight className="w-2 h-2" /> {GEN_LOG_MESSAGES[(genLogIndex + 1) % GEN_LOG_MESSAGES.length]}
+                        </div>
+                      </div>
+                      <div className="mt-4 h-1.5 w-full bg-zinc-800 relative">
+                         <div className="absolute inset-y-0 left-0 bg-[#00ff66] transition-all duration-300" style={{ width: `${((genLogIndex + 1) / GEN_LOG_MESSAGES.length) * 100}%` }}></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+            )}
+            
             <div className="absolute -top-3 left-8 bg-[#141418] border-2 border-[#2a2a32] px-4 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-[#f0f0f5]">
-              SND_BUILDER
+              AI_ARCHITECT
             </div>
 
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
-              <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">
-                MODE: {isManualMode ? <span className="text-[#00e5ff]">MANUAL_CONSTRUCT</span> : <span className="text-[#00ff66]">AI_GENERATOR</span>}
+              <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest flex items-center gap-3">
+                MODE: {isManualMode ? <span className="text-[#00e5ff]">MANUAL_CONSTRUCT</span> : <span className="text-[#00ff66]">NEURAL_SYNTHESIS</span>}
               </div>
               <button 
                 onClick={() => setIsManualMode(!isManualMode)}
                 className={`px-3 py-1 border-2 text-[10px] font-bold uppercase transition-all ${isManualMode ? 'bg-[#00e5ff] text-black border-black shadow-[2px_2px_0px_#007785]' : 'bg-transparent text-zinc-500 border-zinc-800 hover:text-white hover:border-zinc-500'}`}
               >
-                TOGGLE_UNIT
+                SWITCH_MODE
               </button>
             </div>
             
             {!isManualMode ? (
-              <div className="flex flex-col sm:flex-row gap-4">
-                <input 
-                  type="text" 
-                  value={state.prompt}
-                  onChange={(e) => dispatch({ type: IntentType.UPDATE_PROMPT, payload: e.target.value })}
-                  placeholder="DESCRIBE_TARGET_SOUND..."
-                  className="flex-1 bg-black border-2 border-[#2a2a32] px-6 py-4 text-white focus:border-[#00ff66] outline-none placeholder-zinc-700 font-mono text-sm uppercase tracking-tighter"
-                  onKeyDown={(e) => e.key === 'Enter' && handleGenerate(false)}
-                />
-                <Button onClick={() => handleGenerate(false)} isLoading={state.isGenerating} icon={<Wand2 className="w-5 h-5" />} className="h-[60px] sm:w-40 border-4 border-black">GENERATE</Button>
+              <div className="space-y-6">
+                <div className="flex flex-wrap gap-2 mb-2">
+                  {PROMPT_CHIPS.map(chip => (
+                    <button 
+                      key={chip} 
+                      onClick={() => addChipToPrompt(chip)}
+                      className="text-[8px] font-mono border border-zinc-800 bg-zinc-900/50 px-2 py-1 text-zinc-500 hover:text-[#00ff66] hover:border-[#00ff66]/50 transition-all uppercase tracking-tighter"
+                    >
+                      + {chip}
+                    </button>
+                  ))}
+                </div>
+                <div className="relative group">
+                  <input 
+                    type="text" 
+                    value={state.prompt}
+                    onChange={(e) => dispatch({ type: IntentType.UPDATE_PROMPT, payload: e.target.value })}
+                    placeholder="E.G. 'POWERFUL_BASS_EXPLOSION_WITH_DEEP_REVERB'..."
+                    className="w-full bg-black border-2 border-[#2a2a32] px-6 py-5 text-white focus:border-[#00ff66] outline-none placeholder-zinc-800 font-mono text-sm uppercase tracking-tighter shadow-inner"
+                    onKeyDown={(e) => e.key === 'Enter' && handleGenerate(false)}
+                  />
+                  {state.prompt && (
+                    <button 
+                      onClick={() => dispatch({ type: IntentType.UPDATE_PROMPT, payload: '' })}
+                      className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-700 hover:text-red-400"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  )}
+                </div>
+                
+                <div className="flex flex-col sm:flex-row gap-4">
+                  <Button 
+                    onClick={() => handleGenerate(false)} 
+                    isLoading={state.isGenerating} 
+                    icon={<Wand2 className="w-5 h-5" />} 
+                    className="flex-1 h-[60px] border-4 border-black"
+                  >
+                    CONSTRUCT_SOUND
+                  </Button>
+                  {selectedSound && (
+                    <Button 
+                      onClick={() => handleGenerate(true)} 
+                      variant="secondary" 
+                      icon={<RefreshCcw className="w-5 h-5" />} 
+                      className="flex-1 h-[60px] border-4 border-black border-l-zinc-800"
+                    >
+                      EVOLVE_SELECTED
+                    </Button>
+                  )}
+                </div>
               </div>
             ) : (
               <div className="space-y-6">
@@ -411,7 +477,6 @@ const App: React.FC = () => {
               </div>
             )}
 
-            {/* Presets Grid */}
             <div className="mt-10 grid grid-cols-1 sm:grid-cols-2 gap-8">
                <div className="space-y-4">
                  <div className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest flex items-center gap-2">
@@ -447,15 +512,14 @@ const App: React.FC = () => {
               <div className="mt-10 pt-8 border-t-2 border-[#2a2a32] flex flex-col sm:flex-row items-center justify-between gap-4">
                   <div className="text-[10px] text-zinc-600 font-mono">ADDR: {selectedSound.id.slice(0,12)}</div>
                   <div className="flex gap-4 w-full sm:w-auto">
-                    <Button variant="secondary" size="sm" onClick={handleSaveAsPreset} icon={<Save className="w-3 h-3"/>} className="flex-1 sm:flex-none">SAVE_PATCH</Button>
-                    <Button variant="secondary" size="sm" onClick={() => { setIsManualMode(false); handleGenerate(true); }} icon={<Sliders className="w-3 h-3"/>} className="flex-1 sm:flex-none">REMIX_DATA</Button>
+                    <Button variant="secondary" size="sm" onClick={handleSaveAsPreset} icon={<Save className="w-3 h-3"/>} className="flex-1 sm:flex-none">SAVE_TO_DATABASE</Button>
+                    <Button variant="secondary" size="sm" onClick={() => { setIsManualMode(true); setManualParams(selectedSound.params); }} icon={<Sliders className="w-3 h-3"/>} className="flex-1 sm:flex-none">MANUAL_EDIT</Button>
                   </div>
               </div>
             )}
           </div>
         </section>
 
-        {/* Library Sidebar */}
         <section className="lg:col-span-4 flex flex-col h-auto lg:h-[calc(100vh-160px)] pixel-card shadow-xl sticky top-10">
             <div className="p-6 pixel-card-header flex items-center justify-between">
                 <div className="flex items-center gap-3 text-[#f0f0f5] font-bold uppercase tracking-widest text-[11px]">
@@ -504,7 +568,7 @@ const App: React.FC = () => {
                 )}
             </div>
             <div className="p-4 bg-black/60 border-t-2 border-[#2a2a32] text-[8px] text-zinc-700 font-mono text-center tracking-widest">
-              LOCAL_CACHE_LOG // SYNC_OK
+              LOCAL_STORAGE // V3.2_READY
             </div>
         </section>
       </div>

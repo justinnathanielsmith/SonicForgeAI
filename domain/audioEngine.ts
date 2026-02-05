@@ -39,15 +39,12 @@ export const generateSoundBuffer = async (params: SynthParams): Promise<AudioBuf
   const ctx = getAudioContext();
   const sampleRate = ctx.sampleRate;
   
-  // Calculate total duration including release and potential delay tails
   const tailDuration = params.delayTime > 0 ? params.delayTime * 5 : 0;
   const totalDuration = Math.max(0.1, params.duration + params.release + tailDuration + (params.reverb > 0 ? 2 : 0));
   const frameCount = sampleRate * totalDuration;
   
   const offlineCtx = new OfflineAudioContext(1, Math.ceil(frameCount), sampleRate);
   
-  // Chain: Source -> Filter -> Distortion -> Delay -> Reverb -> MasterGain -> Destination
-
   const masterGain = offlineCtx.createGain();
   masterGain.connect(offlineCtx.destination);
 
@@ -60,11 +57,9 @@ export const generateSoundBuffer = async (params: SynthParams): Promise<AudioBuf
     const reverbWet = offlineCtx.createGain();
     reverbWet.gain.value = params.reverb * 0.5;
     
-    // Parallel reverb path
     reverbWet.connect(masterGain);
     reverbNode.connect(reverbWet);
     currentLink = reverbNode; 
-    // We'll connect the previous stage to both masterGain (dry) and reverbNode (wet)
   }
 
   // Delay
@@ -79,7 +74,7 @@ export const generateSoundBuffer = async (params: SynthParams): Promise<AudioBuf
     feedbackGain.connect(delayNode);
     
     const delayWet = offlineCtx.createGain();
-    delayWet.gain.value = 0.3; // subtle delay wetness
+    delayWet.gain.value = 0.3;
     delayNode.connect(delayWet);
     delayWet.connect(masterGain);
 
@@ -97,8 +92,36 @@ export const generateSoundBuffer = async (params: SynthParams): Promise<AudioBuf
   // Filter
   const filter = offlineCtx.createBiquadFilter();
   filter.type = (params.filterType || 'lowpass') as BiquadFilterType;
-  filter.frequency.value = params.filterFreq || 2000;
+  filter.frequency.setValueAtTime(params.filterFreq, 0);
   filter.Q.value = params.qFactor || 1;
+
+  // Filter Modulation
+  if (params.filterModLfoDepth > 0 && params.filterModLfoRate > 0) {
+    const lfo = offlineCtx.createOscillator();
+    lfo.type = 'sine';
+    lfo.frequency.setValueAtTime(params.filterModLfoRate, 0);
+    const lfoGain = offlineCtx.createGain();
+    lfoGain.gain.setValueAtTime(params.filterModLfoDepth, 0);
+    lfo.connect(lfoGain);
+    lfoGain.connect(filter.frequency);
+    lfo.start(0);
+    lfo.stop(totalDuration);
+  }
+
+  if (params.filterModEnvDepth > 0) {
+    const attack = Math.max(0, params.attack);
+    const decay = Math.max(0, params.decay);
+    const sustain = Math.max(0, params.sustain);
+    const startVal = params.filterFreq;
+    const peakVal = Math.min(22000, startVal + params.filterModEnvDepth);
+    const sustainVal = Math.min(22000, startVal + (params.filterModEnvDepth * sustain));
+
+    filter.frequency.setValueAtTime(startVal, 0);
+    filter.frequency.exponentialRampToValueAtTime(peakVal, attack || 0.001);
+    filter.frequency.exponentialRampToValueAtTime(sustainVal, attack + decay || 0.002);
+    filter.frequency.setValueAtTime(sustainVal, params.duration);
+    filter.frequency.exponentialRampToValueAtTime(Math.max(20, startVal), params.duration + params.release);
+  }
 
   // Connection logic
   let sourceOut: AudioNode = filter;
@@ -107,7 +130,7 @@ export const generateSoundBuffer = async (params: SynthParams): Promise<AudioBuf
     sourceOut = distortionNode;
   }
 
-  sourceOut.connect(masterGain); // Dry
+  sourceOut.connect(masterGain);
   if (delayInput) sourceOut.connect(delayInput);
   if (params.reverb > 0) sourceOut.connect(currentLink);
 
@@ -124,9 +147,69 @@ export const generateSoundBuffer = async (params: SynthParams): Promise<AudioBuf
     noiseSource.buffer = buffer;
     source = noiseSource;
     source.connect(filter);
+  } else if (params.waveform === WaveformType.PULSE) {
+    // Variable Pulse Wave simulated by two saw waves
+    // pulse width is determined by phase offset
+    const osc1 = offlineCtx.createOscillator();
+    const osc2 = offlineCtx.createOscillator();
+    osc1.type = 'sawtooth';
+    osc2.type = 'sawtooth';
+    
+    const inverter = offlineCtx.createGain();
+    inverter.gain.value = -1;
+    
+    const pulseGain = offlineCtx.createGain();
+    pulseGain.gain.value = 0.5; // Gain correction
+
+    osc1.connect(pulseGain);
+    osc2.connect(inverter);
+    inverter.connect(pulseGain);
+    pulseGain.connect(filter);
+
+    const freqStart = params.frequencyStart;
+    const freqEnd = params.frequencyEnd;
+    
+    osc1.frequency.setValueAtTime(freqStart, 0);
+    osc2.frequency.setValueAtTime(freqStart, 0);
+    
+    if (Math.abs(freqStart - freqEnd) > 1) {
+      osc1.frequency.exponentialRampToValueAtTime(freqEnd, params.duration);
+      osc2.frequency.exponentialRampToValueAtTime(freqEnd, params.duration);
+    } else {
+      osc1.frequency.setValueAtTime(freqEnd, params.duration);
+      osc2.frequency.setValueAtTime(freqEnd, params.duration);
+    }
+
+    // Set Pulse Width via constant phase offset
+    // Web Audio doesn't have a built-in PWM easily, but we can delay one of the oscillators
+    const delay = offlineCtx.createDelay(0.1);
+    const period = 1 / freqStart;
+    delay.delayTime.setValueAtTime(period * (params.pulseWidth || 0.5), 0);
+    
+    // In actual implementation for variable freq, we'd need more logic, 
+    // but for simple pulses, this offset works.
+    osc2.disconnect(inverter);
+    osc2.connect(delay);
+    delay.connect(inverter);
+
+    source = osc1; // Primary trigger
+    osc1.start(0);
+    osc2.start(0);
+    osc1.stop(params.duration + params.release);
+    osc2.stop(params.duration + params.release);
   } else {
     const osc = offlineCtx.createOscillator();
-    osc.type = (params.waveform || 'sine') as OscillatorType;
+    if (params.waveform === WaveformType.CUSTOM && params.harmonics && params.harmonics.length > 0) {
+      const real = new Float32Array(params.harmonics.length + 1);
+      const imag = new Float32Array(params.harmonics.length + 1);
+      params.harmonics.forEach((amp, i) => {
+        imag[i + 1] = amp; // Sine components
+      });
+      const wave = offlineCtx.createPeriodicWave(real, imag);
+      osc.setPeriodicWave(wave);
+    } else {
+      osc.type = (params.waveform || 'sine') as OscillatorType;
+    }
     
     osc.frequency.setValueAtTime(params.frequencyStart, 0);
     const endFreq = Math.max(0.001, params.frequencyEnd);
@@ -138,6 +221,8 @@ export const generateSoundBuffer = async (params: SynthParams): Promise<AudioBuf
 
     source = osc;
     source.connect(filter);
+    source.start(0);
+    source.stop(params.duration + params.release);
   }
 
   // Envelope (ADSR)
@@ -148,13 +233,10 @@ export const generateSoundBuffer = async (params: SynthParams): Promise<AudioBuf
   const release = Math.max(0, params.release);
 
   masterGain.gain.setValueAtTime(0, 0);
-  masterGain.gain.linearRampToValueAtTime(vol, attack);
-  masterGain.gain.linearRampToValueAtTime(sustain * vol, attack + decay);
+  masterGain.gain.linearRampToValueAtTime(vol, attack || 0.001);
+  masterGain.gain.linearRampToValueAtTime(sustain * vol, attack + decay || 0.002);
   masterGain.gain.setValueAtTime(sustain * vol, params.duration);
   masterGain.gain.linearRampToValueAtTime(0, params.duration + release);
-
-  source.start(0);
-  source.stop(params.duration + release);
 
   return await offlineCtx.startRendering();
 };

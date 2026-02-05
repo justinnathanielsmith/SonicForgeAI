@@ -1,3 +1,4 @@
+
 import { SynthParams, WaveformType } from '../types';
 
 export interface SoundPreset {
@@ -25,10 +26,17 @@ export const SOUND_PRESETS: SoundPreset[] = [
       filterType: 'lowpass',
       filterFreq: 4000,
       qFactor: 1,
+      // Fix: Add missing modulation parameters
+      filterModLfoRate: 0,
+      filterModLfoDepth: 0,
+      filterModEnvDepth: 0,
       distortion: 0.1,
       delayTime: 0,
       delayFeedback: 0,
-      reverb: 0.1
+      reverb: 0.1,
+      // Fix: Add missing pulseWidth and harmonics
+      pulseWidth: 0.5,
+      harmonics: [1.0]
     }
   },
   {
@@ -48,10 +56,17 @@ export const SOUND_PRESETS: SoundPreset[] = [
       filterType: 'lowpass',
       filterFreq: 2000,
       qFactor: 1,
+      // Fix: Add missing modulation parameters
+      filterModLfoRate: 0,
+      filterModLfoDepth: 0,
+      filterModEnvDepth: 0,
       distortion: 0,
       delayTime: 0,
       delayFeedback: 0,
-      reverb: 0
+      reverb: 0,
+      // Fix: Add missing pulseWidth and harmonics
+      pulseWidth: 0.5,
+      harmonics: [1.0]
     }
   },
   {
@@ -71,10 +86,17 @@ export const SOUND_PRESETS: SoundPreset[] = [
       filterType: 'lowpass',
       filterFreq: 350,
       qFactor: 4,
+      // Fix: Add missing modulation parameters
+      filterModLfoRate: 0,
+      filterModLfoDepth: 0,
+      filterModEnvDepth: 0,
       distortion: 0.8,
       delayTime: 0,
       delayFeedback: 0,
-      reverb: 0.4
+      reverb: 0.4,
+      // Fix: Add missing pulseWidth and harmonics
+      pulseWidth: 0.5,
+      harmonics: [1.0]
     }
   },
   {
@@ -94,10 +116,17 @@ export const SOUND_PRESETS: SoundPreset[] = [
       filterType: 'highpass',
       filterFreq: 1200,
       qFactor: 2,
+      // Fix: Add missing modulation parameters
+      filterModLfoRate: 0,
+      filterModLfoDepth: 0,
+      filterModEnvDepth: 0,
       distortion: 0.4,
       delayTime: 0.25,
       delayFeedback: 0.5,
-      reverb: 0.2
+      reverb: 0.2,
+      // Fix: Add missing pulseWidth and harmonics
+      pulseWidth: 0.5,
+      harmonics: [1.0]
     }
   },
   {
@@ -117,10 +146,17 @@ export const SOUND_PRESETS: SoundPreset[] = [
       filterType: 'lowpass',
       filterFreq: 3000,
       qFactor: 1,
+      // Fix: Add missing modulation parameters
+      filterModLfoRate: 0,
+      filterModLfoDepth: 0,
+      filterModEnvDepth: 0,
       distortion: 0,
       delayTime: 0,
       delayFeedback: 0,
-      reverb: 0.9
+      reverb: 0.9,
+      // Fix: Add missing pulseWidth and harmonics
+      pulseWidth: 0.5,
+      harmonics: [1.0]
     }
   }
 ];

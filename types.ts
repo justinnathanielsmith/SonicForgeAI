@@ -5,7 +5,9 @@ export enum WaveformType {
   SQUARE = 'square',
   SAWTOOTH = 'sawtooth',
   TRIANGLE = 'triangle',
-  NOISE = 'noise'
+  NOISE = 'noise',
+  PULSE = 'pulse',
+  CUSTOM = 'custom'
 }
 
 export interface SynthParams {
@@ -21,11 +23,18 @@ export interface SynthParams {
   filterType: 'lowpass' | 'highpass' | 'bandpass' | 'allpass';
   filterFreq: number;
   qFactor: number;
-  // New Effects
+  // Modulation
+  filterModLfoRate: number; // Hz, 0-20
+  filterModLfoDepth: number; // Hz, 0-5000
+  filterModEnvDepth: number; // Hz, 0-5000
+  // Effects
   distortion: number; // 0-1
   delayTime: number; // 0-1
   delayFeedback: number; // 0-1
   reverb: number; // 0-1
+  // Complex Waveform Params
+  pulseWidth: number; // 0.01 - 0.99 for pulse waves
+  harmonics: number[]; // Array of amplitudes for custom periodic waves [fundamental, 2nd, 3rd...]
 }
 
 export interface SoundEntity {
@@ -34,7 +43,7 @@ export interface SoundEntity {
   description: string;
   params: SynthParams;
   timestamp: number;
-  audioBuffer?: AudioBuffer; // Transient, not persisted usually, but kept for playback
+  audioBuffer?: AudioBuffer; // Transient
   blobUrl?: string;
 }
 
@@ -43,6 +52,24 @@ export interface SoundPreset {
   name: string;
   description: string;
   params: SynthParams;
+}
+
+/**
+ * Repository Pattern Interface
+ * Decouples the UI/MVI layer from service implementations.
+ */
+export interface ISoundRepository {
+  generateParams(prompt: string, baseParams?: SynthParams): Promise<SynthParams>;
+  renderAudio(params: SynthParams): Promise<AudioBuffer>;
+  
+  getHistory(): SoundEntity[];
+  saveHistory(history: SoundEntity[]): void;
+  
+  getCustomPresets(): SoundPreset[];
+  saveCustomPresets(presets: SoundPreset[]): void;
+  
+  exportWav(buffer: AudioBuffer): Blob;
+  exportMidi(params: SynthParams): Blob;
 }
 
 // MVI / Architecture Types

@@ -13,42 +13,34 @@ export const INITIAL_SYNTH_PARAMS: SynthParams = {
   filterType: 'lowpass',
   filterFreq: 2000,
   qFactor: 1,
+  filterModLfoRate: 0,
+  filterModLfoDepth: 0,
+  filterModEnvDepth: 0,
   distortion: 0,
   delayTime: 0,
   delayFeedback: 0,
-  reverb: 0
+  reverb: 0,
+  pulseWidth: 0.5,
+  harmonics: [1, 0.5, 0.33, 0.25, 0.2, 0.16, 0.14, 0.12]
 };
 
 export const SYSTEM_INSTRUCTION = `
 You are an expert Audio Synthesizer Engineer for game sound effects.
 Your output must be strictly a JSON object matching the 'SynthParams' schema.
-Do not output markdown code blocks. Just the raw JSON.
 
-Schema:
-{
-  "waveform": "sine" | "square" | "sawtooth" | "triangle" | "noise",
-  "frequencyStart": number (Hz, 20-20000),
-  "frequencyEnd": number (Hz, 20-20000),
-  "duration": number (seconds, 0.1-5.0),
-  "attack": number (seconds, 0-1),
-  "decay": number (seconds, 0-1),
-  "sustain": number (0-1 gain level),
-  "release": number (seconds, 0-2),
-  "volume": number (0-1),
-  "filterType": "lowpass" | "highpass" | "bandpass",
-  "filterFreq": number (Hz),
-  "qFactor": number (0.1-20),
-  "distortion": number (0-1),
-  "delayTime": number (0-1 seconds),
-  "delayFeedback": number (0-0.9),
-  "reverb": number (0-1 wetness)
-}
+Core Rules:
+- Return ONLY the raw JSON.
+- Ensure all 21 fields are present.
+- frequencyStart/End should be > 20Hz.
+- filterType: "lowpass" | "highpass" | "bandpass" | "allpass".
+- waveform: "sine" | "square" | "sawtooth" | "triangle" | "noise" | "pulse" | "custom".
 
-Tips for sounds:
-- "Laser": Sawtooth/Square, High Freq -> Low Freq slide, Short decay.
-- "Jump": Square/Sine, Low Freq -> High Freq slide.
-- "Explosion": Noise, Low Pass Filter, Long decay, high Distortion.
-- "Powerup": Triangle, upward slide, some Delay and Reverb for space.
-- "UI Click": Sine, very short duration, no reverb.
-- "Impact": Noise + Sine, distortion, fast decay.
+Design Logic:
+- Pulse waves are excellent for retro 8-bit sounds.
+- Noise + Lowpass + High Distortion = Explosion.
+- High frequency start + Low frequency end = Laser shot.
+- Exponential slides create punchier sounds.
+- Custom harmonics [1, 0.6, 0.4...] create rich, bell-like or metallic timbres.
+- LFO modulation creates "wobble" or "vibrato".
+- Filter Envelope Depth creates "squelch" or "snap" at the start of sounds.
 `;
